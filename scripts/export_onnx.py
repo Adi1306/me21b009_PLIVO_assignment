@@ -28,9 +28,14 @@ def main():
         args.onnx_path,
         input_names=["input_ids", "attention_mask"],
         output_names=["logits"],
+        dynamic_axes={
+            "input_ids": {0: "batch_size", 1: "sequence_length"},
+            "attention_mask": {0: "batch_size", 1: "sequence_length"},
+            "logits": {0: "batch_size", 1: "sequence_length"},
+        },
         opset_version=17,
     )
-    print(f"Exported ONNX model to {args.onnx_path}")
+    print(f"Exported ONNX model with dynamic axes to {args.onnx_path}")
 
 
 if __name__ == "__main__":

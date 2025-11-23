@@ -2,6 +2,7 @@ import onnxruntime as ort
 import argparse
 import json
 import time
+import os
 from transformers import AutoTokenizer
 
 
@@ -11,9 +12,16 @@ def main():
     ap.add_argument("--input", default="data/dev.jsonl")
     ap.add_argument("--runs", type=int, default=50)
     ap.add_argument("--max_length", type=int, default=256)
+    # Added argument to specify where the tokenizer is
+    ap.add_argument("--model_dir", default="out_finetuned")
     args = ap.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained("out")
+    # Load tokenizer from the correct local directory
+    if not os.path.exists(args.model_dir):
+        print(f"Error: Model directory '{args.model_dir}' not found.")
+        return
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
 
     sess = ort.InferenceSession(args.onnx)
 
@@ -23,6 +31,23 @@ def main():
             texts.append(json.loads(line)["text"])
 
     times = []
+    # Warmup
+    print("Warming up...")
+    for _ in range(5):
+        txt = texts[0]
+        enc = tokenizer(
+            txt,
+            return_tensors="np",
+            truncation=True,
+            max_length=args.max_length,
+            padding="max_length",
+        )
+        sess.run(
+            None,
+            {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]},
+        )
+
+    print(f"Running inference on {len(texts)} examples for {args.runs} runs...")
     for i in range(args.runs):
         txt = texts[i % len(texts)]
         enc = tokenizer(
