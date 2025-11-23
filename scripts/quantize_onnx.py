@@ -9,12 +9,8 @@ def main():
     args = ap.parse_args()
 
     print("Quantizing model...")
-    quantize_dynamic(
-        args.in_model,
-        args.out_model,
-        weight_type=QuantType.QInt8,
-        optimize_model=True,  # IMPORTANT for speed
-    )
+
+    quantize_dynamic(args.in_model, args.out_model, weight_type=QuantType.QInt8)
 
     print("Saved INT8 model:", args.out_model)
 
