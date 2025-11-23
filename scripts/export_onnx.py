@@ -21,7 +21,7 @@ def main():
     dummy = tokenizer(
         sample,
         return_tensors="pt",
-        max_length=48,
+        max_length=64,  
         padding="max_length",
         truncation=True,
     )
@@ -47,3 +47,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
