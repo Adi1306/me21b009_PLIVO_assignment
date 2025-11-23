@@ -19,7 +19,7 @@ def parse_args():
     ap.add_argument("--batch_size", type=int, default=8)
     ap.add_argument("--epochs", type=int, default=3)
     ap.add_argument("--lr", type=float, default=5e-5)
-    ap.add_argument("--max_length", type=int, default=256)
+    ap.add_argument("--max_length", type=int, default=64)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return ap.parse_args()
 
