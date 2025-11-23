@@ -1,70 +1,73 @@
-import json
 import time
 import argparse
-import statistics
-
-import torch
-from transformers import AutoTokenizer, AutoModelForTokenClassification
+import onnxruntime as ort
+from transformers import AutoTokenizer
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--model_dir", default="out")
-    ap.add_argument("--model_name", default=None)
-    ap.add_argument("--input", default="data/dev.jsonl")
-    ap.add_argument("--max_length", type=int, default=256)
-    ap.add_argument("--runs", type=int, default=50)
-    ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_dir", required=True)
+    parser.add_argument("--input", required=True)
+    parser.add_argument("--runs", type=int, default=50)
+    parser.add_argument("--max_length", type=int, default=48)
+    args = parser.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_dir if args.model_name is None else args.model_name)
-    model = AutoModelForTokenClassification.from_pretrained(args.model_dir)
-    model.to(args.device)
-    model.eval()
+    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
 
-    texts = []
+    sess_options = ort.SessionOptions()
+    sess_options.intra_op_num_threads = 1
+    sess_options.inter_op_num_threads = 1
+    sess_options.graph_optimization_level = (
+        ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    )
+
+    ort.set_default_logger_severity(3)
+
+    session = ort.InferenceSession(
+        f"{args.model_dir}/model.quant.onnx",
+        sess_options,
+        providers=["CPUExecutionProvider"],
+    )
+
     with open(args.input, "r", encoding="utf-8") as f:
-        for line in f:
-            obj = json.loads(line)
-            texts.append(obj["text"])
+        sample = f.readline()
 
-    if not texts:
-        print("No texts found in input file.")
-        return
+    encoded = tokenizer(
+        sample,
+        return_tensors="np",
+        padding="max_length",
+        truncation=True,
+        max_length=args.max_length,
+    )
 
-    times_ms = []
-
-    # warmup
-    for _ in range(5):
-        t = texts[0]
-        enc = tokenizer(
-            t,
-            truncation=True,
-            max_length=args.max_length,
-            return_tensors="pt",
+    print("Warming up...")
+    for _ in range(20):
+        session.run(
+            ["logits"],
+            {
+                "input_ids": encoded["input_ids"],
+                "attention_mask": encoded["attention_mask"],
+            },
         )
-        with torch.no_grad():
-            _ = model(input_ids=enc["input_ids"].to(args.device), attention_mask=enc["attention_mask"].to(args.device))
 
-    for i in range(args.runs):
-        t = texts[i % len(texts)]
-        enc = tokenizer(
-            t,
-            truncation=True,
-            max_length=args.max_length,
-            return_tensors="pt",
+    print(f"Benchmarking for {args.runs} runs...")
+
+    times = []
+    for _ in range(args.runs):
+        s = time.perf_counter()
+        session.run(
+            ["logits"],
+            {
+                "input_ids": encoded["input_ids"],
+                "attention_mask": encoded["attention_mask"],
+            },
         )
-        start = time.perf_counter()
-        with torch.no_grad():
-            _ = model(input_ids=enc["input_ids"].to(args.device), attention_mask=enc["attention_mask"].to(args.device))
-        end = time.perf_counter()
-        times_ms.append((end - start) * 1000.0)
+        times.append((time.perf_counter() - s) * 1000)
 
-    p50 = statistics.median(times_ms)
-    times_sorted = sorted(times_ms)
-    p95 = times_sorted[int(0.95 * len(times_sorted)) - 1]
+    p50 = sorted(times)[len(times) // 2]
+    p95 = sorted(times)[int(len(times) * 0.95)]
 
-    print(f"Latency over {args.runs} runs (batch_size=1):")
+    print(f"Latency over {args.runs} runs:")
     print(f"  p50: {p50:.2f} ms")
     print(f"  p95: {p95:.2f} ms")
 

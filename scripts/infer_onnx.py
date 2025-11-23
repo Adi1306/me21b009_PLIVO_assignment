@@ -1,73 +1,79 @@
-import onnxruntime as ort
-import argparse
 import json
 import time
-import os
+import argparse
+import onnxruntime as ort
 from transformers import AutoTokenizer
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--onnx", default="model.quant.onnx")
-    ap.add_argument("--input", default="data/dev.jsonl")
+    ap.add_argument("--onnx", required=True)
+    ap.add_argument("--input", required=True)
     ap.add_argument("--runs", type=int, default=50)
-    ap.add_argument("--max_length", type=int, default=256)
-    # Added argument to specify where the tokenizer is
-    ap.add_argument("--model_dir", default="out_finetuned")
+    ap.add_argument("--max_length", type=int, default=48)
     args = ap.parse_args()
 
-    # Load tokenizer from the correct local directory
-    if not os.path.exists(args.model_dir):
-        print(f"Error: Model directory '{args.model_dir}' not found.")
-        return
+    tokenizer = AutoTokenizer.from_pretrained("out_finetuned")
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
+    sess_options = ort.SessionOptions()
+    sess_options.intra_op_num_threads = 1
+    sess_options.inter_op_num_threads = 1
+    sess_options.graph_optimization_level = (
+        ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    )
 
-    sess = ort.InferenceSession(args.onnx)
+    ort.set_default_logger_severity(3)  # disable ORT logging
 
+    session = ort.InferenceSession(
+        args.onnx, sess_options, providers=["CPUExecutionProvider"]
+    )
+
+    # Load sample texts
     texts = []
     with open(args.input, "r", encoding="utf-8") as f:
         for line in f:
-            texts.append(json.loads(line)["text"])
+            obj = json.loads(line)
+            texts.append(obj["text"])
+            if len(texts) >= 300:
+                break
 
-    times = []
-    # Warmup
+    encoded = [
+        tokenizer(
+            t,
+            return_tensors="np",
+            padding="max_length",
+            truncation=True,
+            max_length=args.max_length,
+        )
+        for t in texts
+    ]
+
     print("Warming up...")
-    for _ in range(5):
-        txt = texts[0]
-        enc = tokenizer(
-            txt,
-            return_tensors="np",
-            truncation=True,
-            max_length=args.max_length,
-            padding="max_length",
-        )
-        sess.run(
-            None,
-            {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]},
+    for _ in range(20):
+        session.run(
+            ["logits"],
+            {
+                "input_ids": encoded[0]["input_ids"],
+                "attention_mask": encoded[0]["attention_mask"],
+            },
         )
 
-    print(f"Running inference on {len(texts)} examples for {args.runs} runs...")
-    for i in range(args.runs):
-        txt = texts[i % len(texts)]
-        enc = tokenizer(
-            txt,
-            return_tensors="np",
-            truncation=True,
-            max_length=args.max_length,
-            padding="max_length",
-        )
+    print(f"Running inference on {len(encoded)} examples for {args.runs} runs...")
+
+    p50_list = []
+    for _ in range(args.runs):
         start = time.perf_counter()
-        sess.run(
-            None,
-            {"input_ids": enc["input_ids"], "attention_mask": enc["attention_mask"]},
+        session.run(
+            ["logits"],
+            {
+                "input_ids": encoded[0]["input_ids"],
+                "attention_mask": encoded[0]["attention_mask"],
+            },
         )
-        end = time.perf_counter()
-        times.append((end - start) * 1000)
+        p50_list.append((time.perf_counter() - start) * 1000)
 
-    times_sorted = sorted(times)
-    p50 = times_sorted[len(times) // 2]
-    p95 = times_sorted[int(len(times) * 0.95)]
+    p50 = sorted(p50_list)[len(p50_list) // 2]
+    p95 = sorted(p50_list)[int(len(p50_list) * 0.95)]
 
     print(f"ONNX p50 = {p50:.2f} ms")
     print(f"ONNX p95 = {p95:.2f} ms")

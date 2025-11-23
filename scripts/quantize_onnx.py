@@ -1,15 +1,22 @@
-from onnxruntime.quantization import quantize_dynamic, QuantType
 import argparse
+from onnxruntime.quantization import quantize_dynamic, QuantType
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in_model", default="model.onnx")
-    ap.add_argument("--out_model", default="model.quant.onnx")
+    ap.add_argument("--in_model", required=True)
+    ap.add_argument("--out_model", required=True)
     args = ap.parse_args()
 
-    quantize_dynamic(args.in_model, args.out_model, weight_type=QuantType.QInt8)
-    print(f"Quantized model saved to {args.out_model}")
+    print("Quantizing model...")
+    quantize_dynamic(
+        args.in_model,
+        args.out_model,
+        weight_type=QuantType.QInt8,
+        optimize_model=True,  # IMPORTANT for speed
+    )
+
+    print("Saved INT8 model:", args.out_model)
 
 
 if __name__ == "__main__":

@@ -6,22 +6,27 @@ from transformers import AutoTokenizer, AutoModelForTokenClassification
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model_dir", required=True)
-    ap.add_argument("--onnx_path", default="model.onnx")
-    ap.add_argument("--max_length", type=int, default=256)
+    ap.add_argument("--onnx_path", required=True)
     args = ap.parse_args()
 
+    print("Loading model...")
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
     model = AutoModelForTokenClassification.from_pretrained(args.model_dir)
     model.eval()
+    model.to("cpu")
+    torch.set_num_threads(1)
 
+    # Dummy input
+    sample = "hello how are you"
     dummy = tokenizer(
-        "hello world",
+        sample,
         return_tensors="pt",
-        max_length=args.max_length,
+        max_length=48,
         padding="max_length",
         truncation=True,
     )
 
+    print("Exporting to ONNX...")
     torch.onnx.export(
         model,
         (dummy["input_ids"], dummy["attention_mask"]),
@@ -29,13 +34,15 @@ def main():
         input_names=["input_ids", "attention_mask"],
         output_names=["logits"],
         dynamic_axes={
-            "input_ids": {0: "batch_size", 1: "sequence_length"},
-            "attention_mask": {0: "batch_size", 1: "sequence_length"},
-            "logits": {0: "batch_size", 1: "sequence_length"},
+            "input_ids": {0: "batch", 1: "sequence"},
+            "attention_mask": {0: "batch", 1: "sequence"},
+            "logits": {0: "batch", 1: "sequence"},
         },
         opset_version=17,
+        do_constant_folding=True,
     )
-    print(f"Exported ONNX model with dynamic axes to {args.onnx_path}")
+
+    print("Saved ONNX model:", args.onnx_path)
 
 
 if __name__ == "__main__":
