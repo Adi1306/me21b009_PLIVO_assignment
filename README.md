@@ -75,3 +75,7 @@ python scripts/infer_onnx.py --onnx out_tiny/model.quant.onnx --input data/dev.j
 - Hyperparameters  
 - Metrics  
 - Latency tradeoffs  
+
+
+#Model Drive Link
+https://drive.google.com/drive/folders/13sgM9Fb0_dh9HnMl1RpJiO0UR6JRk2Uv?usp=sharing
